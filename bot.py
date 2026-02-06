@@ -1,15 +1,18 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler)
-import asyncio
 import os
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes,
+    filters, CallbackQueryHandler
+)
 from dotenv import load_dotenv
+from fastapi import FastAPI
 
 load_dotenv()
-TOKEN = os.getenv('BOT_TOKEN')
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://your-bot.onrender.com/webhook
 
-# commands
-
-async def start(update : Update, context: ContextTypes.DEFAULT_TYPE):
+# Telegram Bot handlers
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("👍 Like", callback_data="like")],
         [InlineKeyboardButton("👎 Dislike", callback_data="dislike")]
@@ -26,7 +29,6 @@ async def countdown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"You said: {update.message.text}")
-    
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -36,12 +38,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(text="You clicked 👎 Dislike!")
 
+# FastAPI app to receive webhooks
+app = FastAPI()
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler('start', start))
-app.add_handler(CommandHandler('countdown', countdown))
-app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
+telegram_app = ApplicationBuilder().token(TOKEN).build()
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CommandHandler("countdown", countdown))
+telegram_app.add_handler(CallbackQueryHandler(button_handler))
+telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
 
-print("Bot is running fine......")
-app.run_polling()
+@app.post("/webhook")
+async def webhook(update: dict):
+    telegram_update = Update.de_json(update, telegram_app.bot)
+    await telegram_app.update_queue.put(telegram_update)
+    return {"ok": True}
+
+# Set webhook when starting
+async def on_startup():
+    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    print(f"Webhook set to: {WEBHOOK_URL}")
+
+@app.on_event("startup")
+async def startup_event():
+    import asyncio
+    asyncio.create_task(on_startup())
+
