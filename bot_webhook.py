@@ -2,17 +2,18 @@ import os
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes,
-    filters, CallbackQueryHandler
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ContextTypes, filters
 )
+from fastapi import FastAPI
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
 
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://your-bot.onrender.com/webhook
 
-# Telegram Bot handlers
+TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+# --- Telegram bot handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("👍 Like", callback_data="like")],
@@ -39,30 +40,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(text="You clicked 👎 Dislike!")
 
-# Initialize Telegram bot app **without polling**
-telegram_app = ApplicationBuilder().token(TOKEN).build()
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CommandHandler("countdown", countdown))
-telegram_app.add_handler(CallbackQueryHandler(button_handler))
-telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
-
-# FastAPI app
+# --- FastAPI app ---
 app = FastAPI()
+bot_app = ApplicationBuilder().token(TOKEN).build()
 
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CommandHandler("countdown", countdown))
+bot_app.add_handler(CallbackQueryHandler(button_handler))
+bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
+
+# Webhook route
+@app.post("/webhook")
+async def webhook(update: dict):
+    tg_update = Update.de_json(update, bot_app.bot)
+    await bot_app.update_queue.put(tg_update)
+    return {"ok": True}
+
+# Startup: set webhook & start queue processing
 @app.on_event("startup")
 async def startup_event():
-    await telegram_app.initialize()
-    await telegram_app.bot.set_webhook(WEBHOOK_URL)
-    print(f"Webhook set to: {WEBHOOK_URL}")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await telegram_app.stop()
-    await telegram_app.shutdown()
-
-@app.post("/webhook")
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.update_queue.put(update)
-    return {"ok": True}
+    await bot_app.initialize()
+    await bot_app.bot.set_webhook(WEBHOOK_URL)
+    print(f"Webhook set to {WEBHOOK_URL}")
+    asyncio.create_task(bot_app.start_polling())  # process update queue
