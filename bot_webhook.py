@@ -12,10 +12,9 @@ from telegram.ext import (
 )
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://your-app.onrender.com/webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://mybot-m2c3.onrender.com/webhook
 
 # -------------------
 # Telegram Handlers
@@ -44,8 +43,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # FastAPI App
 # -------------------
 app = FastAPI()
-
-# Create Telegram Application
 bot_app = ApplicationBuilder().token(TOKEN).build()
 
 # Add handlers
@@ -63,6 +60,8 @@ async def telegram_webhook(update: dict):
 # Startup: initialize bot and set webhook
 @app.on_event("startup")
 async def startup_event():
-    await bot_app.initialize()  # initialize bot properly
+    await bot_app.initialize()  # must initialize first
     await bot_app.bot.set_webhook(WEBHOOK_URL)
-    print(f"Webhook successfully set to: {WEBHOOK_URL}")
+    print(f"Webhook set to: {WEBHOOK_URL}")
+    # Start the queue processor
+    asyncio.create_task(bot_app.start())  # this will process incoming updates
