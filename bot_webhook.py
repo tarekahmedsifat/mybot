@@ -1,11 +1,12 @@
 import os
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes,
     filters, CallbackQueryHandler
 )
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -38,28 +39,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(text="You clicked 👎 Dislike!")
 
-# FastAPI app to receive webhooks
-app = FastAPI()
-
+# Initialize Telegram bot app **without polling**
 telegram_app = ApplicationBuilder().token(TOKEN).build()
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("countdown", countdown))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
 
-@app.post("/webhook")
-async def webhook(update: dict):
-    telegram_update = Update.de_json(update, telegram_app.bot)
-    await telegram_app.update_queue.put(telegram_update)
-    return {"ok": True}
-
-# Set webhook when starting
-async def on_startup():
-    await telegram_app.bot.set_webhook(WEBHOOK_URL)
-    print(f"Webhook set to: {WEBHOOK_URL}")
+# FastAPI app
+app = FastAPI()
 
 @app.on_event("startup")
 async def startup_event():
-    import asyncio
-    asyncio.create_task(on_startup())
+    await telegram_app.initialize()
+    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    print(f"Webhook set to: {WEBHOOK_URL}")
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    await telegram_app.stop()
+    await telegram_app.shutdown()
+
+@app.post("/webhook")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.update_queue.put(update)
+    return {"ok": True}
